@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>삼성전자 매출 현황 실시간 대시보드</title>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- html2pdf.js CDN (PDF 변환) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', -apple-system, sans-serif; }
+    body { background-color: #f4f6f9; color: #333; padding: 20px; }
+    
+    header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 24px; font-weight: 700; color: #1e293b; }
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+    .badge { background: #0284c7; color: #fff; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+    
+    .pdf-btn { display: flex; align-items: center; gap: 6px; background: #dc2626; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .pdf-btn:hover { background: #b91c1c; }
+
+    #loading { display: flex; justify-content: center; align-items: center; height: 250px; font-size: 18px; font-weight: 600; color: #0284c7; }
+
+    /* 최상단 필터 바 */
+    .filter-bar { background: #fff; padding: 16px 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+    .filter-group { display: flex; align-items: center; gap: 8px; }
+    .filter-group label { font-size: 14px; font-weight: 600; color: #475569; }
+    .filter-group select, .filter-group input { padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; color: #334155; outline: none; }
+    .reset-btn { margin-left: auto; padding: 8px 16px; background: #64748b; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+
+    /* KPI 카드 */
+    .kpi-container { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+    .kpi-card { background: #fff; padding: 14px 18px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 5px solid #0284c7; }
+    .kpi-title { font-size: 12px; color: #64748b; margin-bottom: 4px; font-weight: 600; }
+    .kpi-value { font-size: 20px; font-weight: 700; color: #0f172a; }
+
+    /* 1) & 2) 상단 레이아웃 */
+    .top-chart-grid { display: grid; grid-template-columns: 3fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+    .chart-card { background: #fff; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 16px; }
+    .chart-card h2 { font-size: 15px; font-weight: 600; color: #334155; margin-bottom: 12px; }
+    
+    .chart-container-large { position: relative; height: 260px; width: 100%; }
+    .chart-container-side { position: relative; height: 260px; width: 100%; }
+    .chart-container-year { position: relative; height: 200px; width: 100%; }
+
+    /* 테이블 스타일 */
+    .table-card { background: #fff; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 16px; overflow-x: auto; }
+    .table-header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .table-header-bar h2 { font-size: 15px; font-weight: 600; color: #334155; }
+    
+    .excel-btn { background: #10b981; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+
+    table { width: 100%; border-collapse: collapse; text-align: right; font-size: 12px; white-space: nowrap; }
+    th, td { padding: 6px 8px; border: 1px solid #cbd5e1; }
+    th { background-color: #f8fafc; color: #475569; font-weight: 600; text-align: center; }
+    td.center-align { text-align: center; font-weight: 600; }
+    td.left-align { text-align: left; font-weight: 500; }
+    
+    .yearly-table th.black-header { background-color: #000; color: #fff; }
+    .yearly-table th.blue-header { background-color: #3b82f6; color: #fff; }
+    .yearly-table td.diff-title { background-color: #fef3c7; color: #b45309; font-weight: 700; text-align: center; }
+    .yearly-table td.diff-val { background-color: #fffbeb; color: #d97706; font-weight: 600; }
+
+    /* PDF 2페이지 강제 나누기 스타일 */
+    .pdf-page { page-break-after: always; break-after: page; }
+
+    /* PDF 출력 모드 전용 보정 CSS */
+    .pdf-export-active {
+      width: 1120px !important;
+      padding: 10px !important;
+      background: #fff !important;
+    }
+    .pdf-export-active .filter-bar, 
+    .pdf-export-active .excel-btn, 
+    .pdf-export-active .pdf-btn { 
+      display: none !important; 
+    }
+    .pdf-export-active .chart-card, 
+    .pdf-export-active .table-card { 
+      box-shadow: none !important; 
+      border: 1px solid #cbd5e1 !important; 
+      margin-bottom: 12px !important; 
+      padding: 12px !important; 
+    }
+    .pdf-export-active table { font-size: 10px !important; }
+    .pdf-export-active th, .pdf-export-active td { padding: 4px 5px !important; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>삼성전자 (SMD/한총) 매출 대시보드</h1>
+    <div class="header-actions">
+      <span class="badge">구글 시트 실시간 연동</span>
+      <button class="pdf-btn" onclick="exportToPDF()">📄 대시보드 PDF 다운로드 (2페이지)</button>
+    </div>
+  </header>
+
+  <!-- 최상단 조회 조건 필터 바 -->
+  <div class="filter-bar">
+    <div class="filter-group">
+      <label>매출일자 :</label>
+      <input type="date" id="startDate"> ~ <input type="date" id="endDate">
+    </div>
+    <div class="filter-group">
+      <label>거래처 :</label>
+      <select id="clientFilter">
+        <option value="ALL">전체 (SMD / 한총)</option>
+        <option value="SMD">SMD</option>
+        <option value="한총">한총</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>카테고리(기종) :</label>
+      <select id="modelFilter">
+        <option value="ALL">전체 기종</option>
+      </select>
+    </div>
+    <button class="reset-btn" onclick="resetFilters()">필터 초기화</button>
+  </div>
+
+  <div id="loading">구글 시트 데이터 가져오는 중...</div>
+
+  <!-- PDF 출력 전체 영역 -->
+  <div id="dashboardContent" style="display: none;">
+    
+    <!-- ================= PAGE 1 ================= -->
+    <div id="pdfPage1" class="pdf-page">
+      <!-- 요약 KPI 카드 -->
+      <div class="kpi-container">
+        <div class="kpi-card" style="border-color: #0284c7;">
+          <div class="kpi-title">조회 총 매출액</div>
+          <div class="kpi-value" id="totalSales">0 원</div>
+        </div>
+        <div class="kpi-card" style="border-color: #10b981;">
+          <div class="kpi-title">조회 총 출고수량</div>
+          <div class="kpi-value" id="totalQty">0 EA</div>
+        </div>
+        <div class="kpi-card" style="border-color: #f59e0b;">
+          <div class="kpi-title">평균 단가 (ASP)</div>
+          <div class="kpi-value" id="avgPrice">0 원</div>
+        </div>
+        <div class="kpi-card" style="border-color: #6366f1;">
+          <div class="kpi-title">조회 데이터 건수</div>
+          <div class="kpi-value" id="totalRecords">0 건</div>
+        </div>
+      </div>
+
+      <!-- 1) 전체 매출액 현황 & 2) 거래처별 비중 -->
+      <div class="top-chart-grid">
+        <div class="chart-card" style="margin-bottom:0;">
+          <h2>1) 전체 매출액 & 출고수량 현황</h2>
+          <div class="chart-container-large">
+            <canvas id="monthlyChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card" style="margin-bottom:0;">
+          <h2>2) 거래처별 매출 비중 [SMD VS 한총]</h2>
+          <div class="chart-container-side">
+            <canvas id="channelChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3) 연간 매출 비교 그래프 -->
+      <div class="chart-card">
+        <h2>3) 연간 매출 비교 (26년 VS 25년) [단위 : 백만원]</h2>
+        <div class="chart-container-year">
+          <canvas id="yearlyCompChart"></canvas>
+        </div>
+      </div>
+
+      <!-- 4) 연간 실적 데이터표 -->
+      <div class="table-card" style="margin-bottom:0;">
+        <div class="table-header-bar">
+          <h2>4) 연간 실적 데이터표 [단위 : 백만원_VAT-, EA]</h2>
+        </div>
+        <div style="overflow-x: auto;">
+          <table class="yearly-table">
+            <thead>
+              <tr>
+                <th class="black-header" style="width:60px;">연</th>
+                <th class="black-header" style="width:60px;">구분</th>
+                <th style="background:#cbd5e1; width:80px;">Total</th>
+                <th style="background:#cbd5e1; width:70px;">월평균</th>
+                <th class="blue-header">1월</th>
+                <th class="blue-header">2월</th>
+                <th class="blue-header">3월</th>
+                <th class="blue-header">4월</th>
+                <th class="blue-header">5월</th>
+                <th class="blue-header">6월</th>
+                <th class="blue-header">7월</th>
+                <th class="blue-header">8월</th>
+                <th class="blue-header">9월</th>
+                <th class="blue-header">10월</th>
+                <th class="blue-header">11월</th>
+                <th class="blue-header">12월</th>
+              </tr>
+            </thead>
+            <tbody id="yearlyTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= PAGE 2 ================= -->
+    <div id="pdfPage2" style="padding-top: 10px;">
+      <!-- 5) 기종 & 제품군별 월별 매출 현황 -->
+      <div class="table-card">
+        <div class="table-header-bar">
+          <h2>5) 기종 & 제품군별 월별 매출 현황 [단위 : 원_VAT-]</h2>
+          <button class="excel-btn" onclick="exportTableToCSV()">
+            📊 엑셀(CSV) 다운로드
+          </button>
+        </div>
+        <div style="overflow-x: auto;">
+          <table id="matrixTable">
+            <thead id="matrixHead"></thead>
+            <tbody id="matrixBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbyYDWHJsQF2No-j9mJbRC8pwVZJYc1PXg4QiLt7whUDX03C4vmN0ftzA2eIzFtvo83VQg/exec';
+
+    let globalAllData = [];
+    let monthlyChartInstance = null;
+    let channelChartInstance = null;
+    let yearlyCompChartInstance = null;
+
+    function parseNumber(val) {
+      if (typeof val === 'number') return val;
+      if (!val) return 0;
+      let clean = String(val).replace(/,/g, '').trim();
+      return parseInt(clean) || 0;
+    }
+
+    async function loadDataFromGAS() {
+      try {
+        const response = await fetch(GAS_API_URL);
+        const rawJsonData = await response.json();
+
+        if (rawJsonData.error) {
+          alert('API 오류: ' + rawJsonData.error);
+          return;
+        }
+
+        globalAllData = rawJsonData.map(row => {
+          let dateStr = row['납품일자'] || row['날짜'] || '';
+          let yearStr = String(row['년도'] || row['연도'] || '').replace(/년/g, '').trim();
+          let monthNum = parseInt(String(row['월'] || '').replace(/월/g, '').trim()) || 0;
+          let monthStr = monthNum < 10 ? '0' + monthNum : String(monthNum);
+          
+          let ymKey = (yearStr && monthNum) ? `${yearStr}-${monthStr}` : '미분류';
+          let clientStr = String(row['구분'] || row['거래처'] || '').trim();
+
+          let amountVal = parseNumber(row['원화 환산 총금액(KRW)'] || row['원화환산총금액(KRW)'] || row['총금액(KRW)'] || row['원화 환산 총금액'] || row['총금액'] || 0);
+          let qtyVal = parseNumber(row['수량'] || row['출고수량'] || 0);
+
+          return {
+            date: dateStr,
+            ym: ymKey,
+            year: yearStr,
+            monthNum: monthNum,
+            monthStr: monthStr,
+            client: clientStr,
+            model: String(row['기종'] || '기타').trim(),
+            category: String(row['제품군'] || '기타').trim(),
+            qty: qtyVal,
+            amount: amountVal
+          };
+        }).filter(item => item.amount > 0 || item.qty > 0);
+
+        initFilterOptions(globalAllData);
+
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('dashboardContent').style.display = 'block';
+
+        document.getElementById('startDate').addEventListener('change', applyFilters);
+        document.getElementById('endDate').addEventListener('change', applyFilters);
+        document.getElementById('clientFilter').addEventListener('change', applyFilters);
+        document.getElementById('modelFilter').addEventListener('change', applyFilters);
+
+        applyFilters();
+
+      } catch (err) {
+        console.error('데이터 호출 실패:', err);
+        document.getElementById('loading').innerText = '데이터를 불러오는 중 오류가 발생했습니다.';
+      }
+    }
+
+    function initFilterOptions(data) {
+      const modelSet = new Set(data.map(d => d.model).filter(m => m && m !== '기타'));
+      const modelSelect = document.getElementById('modelFilter');
+      modelSelect.innerHTML = '<option value="ALL">전체 기종</option>';
+      
+      Array.from(modelSet).sort().forEach(model => {
+        const opt = document.createElement('option');
+        opt.value = model;
+        opt.textContent = model;
+        modelSelect.appendChild(opt);
+      });
+    }
+
+    function applyFilters() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      const clientVal = document.getElementById('clientFilter').value;
+      const modelVal = document.getElementById('modelFilter').value;
+
+      const filtered = globalAllData.filter(item => {
+        if (startDate && item.date && item.date < startDate) return false;
+        if (endDate && item.date && item.date > endDate) return false;
+        if (clientVal !== 'ALL' && item.client !== clientVal) return false;
+        if (modelVal !== 'ALL' && item.model !== modelVal) return false;
+
+        return true;
+      });
+
+      updateDashboard(filtered);
+    }
+
+    function resetFilters() {
+      document.getElementById('startDate').value = '';
+      document.getElementById('endDate').value = '';
+      document.getElementById('clientFilter').value = 'ALL';
+      document.getElementById('modelFilter').value = 'ALL';
+      applyFilters();
+    }
+
+    function updateDashboard(data) {
+      updateKPI(data);
+      renderMonthlyChart(data);
+      renderChannelChart(data);
+      renderYearlyComparison(data);
+      renderMatrixTable(data);
+    }
+
+    function updateKPI(data) {
+      const totalSales = data.reduce((sum, item) => sum + item.amount, 0);
+      const totalQty = data.reduce((sum, item) => sum + item.qty, 0);
+      const avgPrice = totalQty > 0 ? Math.round(totalSales / totalQty) : 0;
+
+      document.getElementById('totalSales').innerText = totalSales.toLocaleString() + ' 원';
+      document.getElementById('totalQty').innerText = totalQty.toLocaleString() + ' EA';
+      document.getElementById('avgPrice').innerText = avgPrice.toLocaleString() + ' 원';
+      document.getElementById('totalRecords').innerText = data.length.toLocaleString() + ' 건';
+    }
+
+    function renderMonthlyChart(data) {
+      const monthlyMap = {};
+      data.forEach(item => {
+        if (!item.ym || item.ym === '미분류') return;
+        if (!monthlyMap[item.ym]) monthlyMap[item.ym] = { amount: 0, qty: 0 };
+        monthlyMap[item.ym].amount += item.amount;
+        monthlyMap[item.ym].qty += item.qty;
+      });
+
+      const sortedKeys = Object.keys(monthlyMap).sort();
+
+      if (monthlyChartInstance) monthlyChartInstance.destroy();
+
+      monthlyChartInstance = new Chart(document.getElementById('monthlyChart'), {
+        type: 'bar',
+        data: {
+          labels: sortedKeys,
+          datasets: [
+            {
+              label: '매출액 (원)',
+              data: sortedKeys.map(k => monthlyMap[k].amount),
+              backgroundColor: 'rgba(2, 132, 199, 0.75)',
+              borderColor: '#0284c7',
+              borderWidth: 1,
+              yAxisID: 'y'
+            },
+            {
+              label: '출고수량 (EA)',
+              data: sortedKeys.map(k => monthlyMap[k].qty),
+              type: 'line',
+              borderColor: '#10b981',
+              backgroundColor: '#10b981',
+              borderWidth: 3,
+              tension: 0.2,
+              fill: false,
+              yAxisID: 'y1'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { type: 'linear', position: 'left', title: { display: true, text: '매출액 (원)' } },
+            y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '출고수량 (EA)' } }
+          }
+        }
+      });
+    }
+
+    function renderChannelChart(data) {
+      let smdAmount = 0;
+      let hanchongAmount = 0;
+
+      data.forEach(item => {
+        if (item.client.includes('SMD')) smdAmount += item.amount;
+        else if (item.client.includes('한총')) hanchongAmount += item.amount;
+      });
+
+      if (channelChartInstance) channelChartInstance.destroy();
+
+      channelChartInstance = new Chart(document.getElementById('channelChart'), {
+        type: 'doughnut',
+        data: {
+          labels: ['SMD', '한총'],
+          datasets: [{
+            data: [smdAmount, hanchongAmount],
+            backgroundColor: ['#0284c7', '#f59e0b'],
+            hoverOffset: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom' },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const val = context.raw || 0;
+                  const total = smdAmount + hanchongAmount;
+                  const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+                  return `${context.label}: ${val.toLocaleString()} 원 (${pct}%)`;
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function renderYearlyComparison(data) {
+      const y25Sales = Array(13).fill(0);
+      const y25Qty = Array(13).fill(0);
+      const y26Sales = Array(13).fill(0);
+      const y26Qty = Array(13).fill(0);
+
+      data.forEach(item => {
+        const m = item.monthNum;
+        if (m >= 1 && m <= 12) {
+          if (item.year === '2025') {
+            y25Sales[m] += item.amount;
+            y25Qty[m] += item.qty;
+          } else if (item.year === '2026') {
+            y26Sales[m] += item.amount;
+            y26Qty[m] += item.qty;
+          }
+        }
+      });
+
+      const y25SalesM = y25Sales.map(v => Math.round(v / 1000000));
+      const y26SalesM = y26Sales.map(v => Math.round(v / 1000000));
+
+      if (yearlyCompChartInstance) yearlyCompChartInstance.destroy();
+
+      yearlyCompChartInstance = new Chart(document.getElementById('yearlyCompChart'), {
+        type: 'line',
+        data: {
+          labels: ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'],
+          datasets: [
+            {
+              label: '2026년',
+              data: y26SalesM.slice(1),
+              borderColor: '#ef4444',
+              backgroundColor: '#ef4444',
+              borderWidth: 3,
+              pointStyle: 'rectRot',
+              pointRadius: 5,
+              tension: 0.1
+            },
+            {
+              label: '2025년',
+              data: y25SalesM.slice(1),
+              borderColor: '#0284c7',
+              backgroundColor: '#0284c7',
+              borderWidth: 3,
+              pointStyle: 'diamond',
+              pointRadius: 5,
+              tension: 0.1
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom' }
+          },
+          scales: {
+            y: { title: { display: true, text: '매출 (백만원)' } }
+          }
+        }
+      });
+
+      const sum26Sales = y26Sales.reduce((a,b)=>a+b, 0);
+      const sum26Qty = y26Qty.reduce((a,b)=>a+b, 0);
+      const sum25Sales = y25Sales.reduce((a,b)=>a+b, 0);
+      const sum25Qty = y25Qty.reduce((a,b)=>a+b, 0);
+
+      const count26 = y26Sales.filter((v,i)=>i>=1 && v>0).length || 1;
+      const count25 = y25Sales.filter((v,i)=>i>=1 && v>0).length || 1;
+
+      const avg26Sales = Math.round((sum26Sales / count26) / 1000000);
+      const avg26Qty = Math.round(sum26Qty / count26);
+      const avg25Sales = Math.round((sum25Sales / count25) / 1000000);
+      const avg25Qty = Math.round(sum25Qty / count25);
+
+      function calcRate(curr, prev) {
+        if (!prev || prev === 0) return '-';
+        const rate = ((curr - prev) / prev) * 100;
+        return (rate > 0 ? '+' : '') + rate.toFixed(1) + '%';
+      }
+
+      let tbodyHtml = `
+        <tr>
+          <td class="center-align" rowspan="2">2026년</td>
+          <td class="center-align">매출</td>
+          <td style="font-weight:700;">${Math.round(sum26Sales/1000000).toLocaleString()}</td>
+          <td>${avg26Sales.toLocaleString()}</td>
+          ${y26SalesM.slice(1).map(v => `<td>${v > 0 ? v.toLocaleString() : 0}</td>`).join('')}
+        </tr>
+        <tr>
+          <td class="center-align">수량</td>
+          <td style="font-weight:700;">${sum26Qty.toLocaleString()}</td>
+          <td>${avg26Qty.toLocaleString()}</td>
+          ${y26Qty.slice(1).map(v => `<td>${v > 0 ? v.toLocaleString() : 0}</td>`).join('')}
+        </tr>
+        <tr>
+          <td class="center-align" rowspan="2">2025년</td>
+          <td class="center-align">매출</td>
+          <td style="font-weight:700;">${Math.round(sum25Sales/1000000).toLocaleString()}</td>
+          <td>${avg25Sales.toLocaleString()}</td>
+          ${y25SalesM.slice(1).map(v => `<td>${v > 0 ? v.toLocaleString() : 0}</td>`).join('')}
+        </tr>
+        <tr>
+          <td class="center-align">수량</td>
+          <td style="font-weight:700;">${sum25Qty.toLocaleString()}</td>
+          <td>${avg25Qty.toLocaleString()}</td>
+          ${y25Qty.slice(1).map(v => `<td>${v > 0 ? v.toLocaleString() : 0}</td>`).join('')}
+        </tr>
+        <tr>
+          <td class="diff-title" rowspan="2">증감<br><span style="font-size:10px;">[전년 동기 대비]</span></td>
+          <td class="diff-title">매출</td>
+          <td class="diff-val">${calcRate(sum26Sales, sum25Sales)}</td>
+          <td class="diff-val">${calcRate(avg26Sales, avg25Sales)}</td>
+          ${y26Sales.slice(1).map((v, i) => `<td class="diff-val">${calcRate(v, y25Sales[i+1])}</td>`).join('')}
+        </tr>
+        <tr>
+          <td class="diff-title">수량</td>
+          <td class="diff-val">${calcRate(sum26Qty, sum25Qty)}</td>
+          <td class="diff-val">${calcRate(avg26Qty, avg25Qty)}</td>
+          ${y26Qty.slice(1).map((v, i) => `<td class="diff-val">${calcRate(v, y25Qty[i+1])}</td>`).join('')}
+        </tr>
+      `;
+
+      document.getElementById('yearlyTableBody').innerHTML = tbodyHtml;
+    }
+
+    function renderMatrixTable(data) {
+      const monthSet = new Set();
+      const matrix = {}; 
+      const monthTotals = {}; 
+      let grandTotal = 0;
+
+      data.forEach(item => {
+        if (!item.ym || item.ym === '미분류') return;
+        monthSet.add(item.ym);
+
+        if (!matrix[item.model]) matrix[item.model] = {};
+        if (!matrix[item.model][item.category]) matrix[item.model][item.category] = {};
+        
+        matrix[item.model][item.category][item.ym] = (matrix[item.model][item.category][item.ym] || 0) + item.amount;
+        monthTotals[item.ym] = (monthTotals[item.ym] || 0) + item.amount;
+        grandTotal += item.amount;
+      });
+
+      const sortedMonths = Array.from(monthSet).sort();
+
+      const thead = document.getElementById('matrixHead');
+      let headHtml = `<tr>
+        <th style="width:110px;">기종</th>
+        <th style="width:130px;">제품군</th>`;
+      sortedMonths.forEach(m => { headHtml += `<th>${m}</th>`; });
+      headHtml += `<th style="background:#e2e8f0;">합계</th><th style="background:#dbeafe; width:90px;">매출 비중(%)</th></tr>`;
+      thead.innerHTML = headHtml;
+
+      const tbody = document.getElementById('matrixBody');
+      let bodyHtml = '';
+
+      Object.keys(matrix).sort().forEach(model => {
+        const categories = Object.keys(matrix[model]).sort();
+        
+        categories.forEach((cat, idx) => {
+          bodyHtml += `<tr>`;
+          if (idx === 0) {
+            bodyHtml += `<td class="left-align" rowspan="${categories.length}">${model}</td>`;
+          }
+          bodyHtml += `<td class="left-align">${cat}</td>`;
+
+          let rowTotal = 0;
+          sortedMonths.forEach(m => {
+            const val = matrix[model][cat][m] || 0;
+            rowTotal += val;
+            bodyHtml += `<td>${val > 0 ? val.toLocaleString() : '-'}</td>`;
+          });
+
+          const sharePct = grandTotal > 0 ? ((rowTotal / grandTotal) * 100).toFixed(1) : '0.0';
+
+          bodyHtml += `<td style="font-weight:600; background:#f8fafc;">${rowTotal.toLocaleString()} 원</td>`;
+          bodyHtml += `<td style="font-weight:600; background:#eff6ff; color:#1d4ed8;">${sharePct}%</td>`;
+          bodyHtml += `</tr>`;
+        });
+      });
+
+      if (sortedMonths.length > 0) {
+        bodyHtml += `<tr style="background:#f1f5f9; font-weight:700;"><td colspan="2" style="text-align:center;">월별 총 합계</td>`;
+        sortedMonths.forEach(m => {
+          const mTot = monthTotals[m] || 0;
+          bodyHtml += `<td>${mTot.toLocaleString()} 원</td>`;
+        });
+        bodyHtml += `<td style="background:#cbd5e1;">${grandTotal.toLocaleString()} 원</td>`;
+        bodyHtml += `<td style="background:#bfdbfe; color:#1e40af;">100.0%</td></tr>`;
+      }
+
+      tbody.innerHTML = bodyHtml || `<tr><td colspan="${sortedMonths.length + 4}" style="text-align:center; padding:20px;">조회 조건에 해당하는 데이터가 없습니다.</td></tr>`;
+    }
+
+    function exportTableToCSV() {
+      const table = document.getElementById("matrixTable");
+      let csv = [];
+      let lastModel = ""; 
+
+      const headers = [];
+      const headCols = table.querySelectorAll("thead tr th");
+      headCols.forEach(col => headers.push(`"${col.innerText.trim()}"`));
+      if (headers.length > 0) csv.push(headers.join(","));
+
+      const rows = table.querySelectorAll("tbody tr");
+      rows.forEach(row => {
+        const rowData = [];
+        const cols = row.querySelectorAll("td");
+
+        cols.forEach(col => {
+          let text = col.innerText.trim().replace(/"/g, '""');
+          if (col.hasAttribute("rowspan")) lastModel = text;
+          if (text !== '-' && !isNaN(text.replace(/,/g, '').replace(' 원', '').replace('%', ''))) {
+            text = text.replace(/,/g, '').replace(' 원', '').replace('%', '');
+          }
+          rowData.push(`"${text}"`);
+        });
+
+        if (cols.length < headCols.length && !row.classList.contains("total-row")) {
+          rowData.unshift(`"${lastModel}"`);
+        }
+
+        csv.push(rowData.join(","));
+      });
+
+      const csvString = "\uFEFF" + csv.join("\n");
+      const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      
+      const today = new Date().toISOString().slice(0, 10);
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute("download", `매출현황_데이터표_${today}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // ★ 정확히 2페이지 분할 및 A4 가로 전체 너비 맞춤 PDF 다운로드
+    function exportToPDF() {
+      const element = document.getElementById('dashboardContent');
+      const today = new Date().toISOString().slice(0, 10);
+
+      // PDF 캡처용 전용 고정 너비 스타일 적용
+      element.classList.add('pdf-export-active');
+
+      const opt = {
+        margin:       [6, 6, 6, 6], // mm
+        filename:     `삼성전자_매출대시보드_${today}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { 
+          scale: 2,
+          useCORS: true, 
+          logging: false, 
+          scrollY: 0,
+          windowWidth: 1120 // 가로 폭 정밀 고정으로 우측 잘림 차단
+        },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' },
+        pagebreak:    { mode: ['css', 'legacy'] }
+      };
+
+      const btn = document.querySelector('.pdf-btn');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '⏳ PDF 생성 중...';
+      btn.disabled = true;
+
+      html2pdf().set(opt).from(element).save().then(() => {
+        element.classList.remove('pdf-export-active');
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }).catch(err => {
+        console.error('PDF 다운로드 오류:', err);
+        element.classList.remove('pdf-export-active');
+        alert('PDF 다운로드 중 오류가 발생했습니다.');
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      });
+    }
+
+    window.onload = loadDataFromGAS;
+  </script>
+</body>
+</html>
